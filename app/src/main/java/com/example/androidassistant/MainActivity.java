@@ -1,5 +1,7 @@
 package com.example.androidassistant;
 
+import static com.example.androidassistant.utils.Image.getImagenetNormalizeOp;
+
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -67,6 +69,7 @@ public class MainActivity extends AppCompatActivity {
     private final ImageProcessor imageProcessor =
             new ImageProcessor.Builder()
                     .add(new ResizeOp(224, 224, ResizeOp.ResizeMethod.BILINEAR))
+                    .add(getImagenetNormalizeOp())
                     .build();
 
     private Interpreter interpreter = null;
