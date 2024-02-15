@@ -28,7 +28,7 @@
             android:id="@+id/voice_input"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:enabled="false"
+            android:enabled="true"
             android:text="activer la reconnaissance vocale" />
 
     </LinearLayout>
