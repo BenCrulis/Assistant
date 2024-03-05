@@ -3,6 +3,7 @@ package com.example.androidassistant;
 import static com.example.androidassistant.utils.Image.getImagenetNormalizeOp;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
@@ -11,6 +12,7 @@ import android.graphics.BitmapFactory;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
+import android.view.Surface;
 import android.view.WindowManager;
 import android.widget.Button;
 
@@ -22,6 +24,7 @@ import androidx.camera.core.ImageProxy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.lifecycle.ProcessLifecycleOwner;
 
+import com.example.androidassistant.utils.DetectUtils;
 import com.example.androidassistant.utils.Image;
 
 import org.tensorflow.lite.DataType;
@@ -44,13 +47,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 public class AssistantApp extends Application {
-    private AssistantApp singleton = null;
+    private static AssistantApp singleton;
     TextToSpeech tts = null;
     CountDownLatch ttsCountDownLatch = null;
 
@@ -73,10 +77,11 @@ public class AssistantApp extends Application {
                     .add(getImagenetNormalizeOp())
                     .build();
 
+    public static final int DEPTH_IMAGE_SIZE = 518;
     private final ImageProcessor imageProcessorDepth =
             new ImageProcessor.Builder()
                     //.add(new Rot90Op(0))
-                    .add(new ResizeOp(518, 518, ResizeOp.ResizeMethod.BILINEAR))
+                    .add(new ResizeOp(DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE, ResizeOp.ResizeMethod.BILINEAR))
                     .add(getImagenetNormalizeOp())
                     .build();
 
@@ -84,9 +89,8 @@ public class AssistantApp extends Application {
     private Interpreter depthAnythingModel = null;
     private Interpreter yoloModel = null;
 
-    public AssistantApp getInstance(){
-        return singleton;
-    }
+    private YOLOW yolow = null;
+
 
     @Override
     public void onCreate() {
@@ -95,8 +99,23 @@ public class AssistantApp extends Application {
         singleton = this;
     }
 
+    public static AssistantApp getInstance() {
+        return AssistantApp.singleton;
+    }
+
     public void init() {
         Log.i("INIT", "initializing everything");
+
+        Context context = getApplicationContext();
+        ActivityManager result = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+        Log.i("INIT", "large memory class: " + result.getLargeMemoryClass());
+
+        // doesn't work
+        //ByteBuffer buffer = ByteBuffer.allocateDirect(1000*1000*1000);
+
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        Log.i("INIT", "max memory: " + maxMemory / (1000*1000));
 
         // setup TTS
         ttsCountDownLatch = new CountDownLatch(1);
@@ -121,7 +140,7 @@ public class AssistantApp extends Application {
 
         imageCapture = new ImageCapture.Builder()
 //                .setTargetRotation(windowManager.getDefaultDisplay().getRotation()) // same as putting nothing
-//                .setTargetRotation(Surface.ROTATION_0)
+                .setTargetRotation(Surface.ROTATION_0)
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
                 .build();
@@ -178,11 +197,22 @@ public class AssistantApp extends Application {
         copyAssetToDisk(basePath + "depth_anything_small.tflite");
         loadAnythingDepth(options);
 
-        copyAssetToDisk(basePath + "yolov8m_int8.tflite");
-        loadYOLO(options);
+//        copyAssetToDisk(basePath + "yolov8m_int8.tflite");
+//        loadYOLO(options);
+
+        yolow = new YOLOW("l");
+        Log.i("YOLOW", "loading YOLO-World");
+        yolow.loadYOLOW(this, options);
+        Log.i("YOLOW", "loading YOLO-World targets");
+        YOLOW.YOLOWTargets general_purpose_targets = YOLOW.load_yolow_classes_file(this, "general_purpose_classes.txt");
+        yolow.add_targets(general_purpose_targets, "general");
+
+        Log.i("YOLOW", "target classes: " + String.join(", ", general_purpose_targets.classes));
+        Log.i("debug", "targets: " + Arrays.toString(general_purpose_targets.tensor.getFloatArray()));
 
         copyAssetToDisk(basePath + "Great_White_Shark.jpg");
         copyAssetToDisk(basePath + "test_image.png");
+        copyAssetToDisk(basePath + "gmu_scene_2_rgb_462.png");
 
         // testing inference
         Log.i("info", "loading model");
@@ -216,33 +246,42 @@ public class AssistantApp extends Application {
             Log.i("info", "after inference");
 
             Log.i("info", Arrays.toString(outputs.array()));
+
+
+            // YOLOW test
+            diskImage = BitmapFactory.decodeFile(basePath + "gmu_scene_2_rgb_462.png");
+            tensorImage = TensorImage.fromBitmap(diskImage);
+            Log.i("YOLOW", "inference test");
+            yolow.infer(tensorImage, "general", 0.5, 0.6);
+
+
         }
         catch (Exception e) {
             Log.e("MODEL", e.toString());
         }
     }
 
-    public void takePhoto(MainActivity activity) {
-        ImageCapture.OnImageCapturedCallback callback = this.getPhotoCallback(activity);
-        imageCapture.takePicture(Executors.newSingleThreadExecutor(), callback);
-    }
-
-    public ImageCapture.OnImageCapturedCallback getPhotoCallback(MainActivity activity) {
-        ImageCapture.OnImageCapturedCallback callback = new ImageCapture.OnImageCapturedCallback() {
+    public void takePhoto(MainActivity activity, int rot) {
+        imageCapture.takePicture(Executors.newSingleThreadExecutor(), new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy image) {
+                boolean imageClassifier = false;
+                boolean yolow_pred = true;
+                boolean depth_pred = false;
+
                 Log.i("PHOTO", "photo successfully taken");
 //                        queueSpeak("J'ai pris une photo, j'analyse...");
                 int height = image.getHeight();
                 int width = image.getWidth();
                 int planes = image.getPlanes().length;
                 int imageRot = image.getImageInfo().getRotationDegrees();
-                int rotation_compensate_k = -Image.compute_k_from_degrees(imageRot);
-                queueSpeak("k=" + rotation_compensate_k);
+//                int rotation_compensate_k = -Image.compute_k_from_degrees(imageRot);
+                int rotation_compensate_k = rot;// + Image.compute_k_from_degrees(imageRot);
+                //queueSpeak("k=" + rotation_compensate_k + ", rota=" + imageRot);
                 Log.i("PHOTO", "width: " + width + ", height: " + height);
                 Log.i("PHOTO", "rotation: " + imageRot + "°");
                 if (height > width) {
-                    queueSpeak("Photo anormale, la hauteur est plus grande que la largeur.");
+                    //queueSpeak("Photo anormale, la hauteur est plus grande que la largeur.");
                 }
                 Bitmap bitmap = image.toBitmap();
                 bitmap = bitmap.copy(bitmap.getConfig(), false);
@@ -264,8 +303,9 @@ public class AssistantApp extends Application {
                 // Preprocess the image
                 tensorImage224.load(bitmap);
                 long beforeClassify = System.currentTimeMillis();
-                if (imageRot != 0) {
-                    queueSpeak("je tourne la photo");
+                if (rotation_compensate_k != 0) {
+                    Log.i("PHOTO", "rotating photo");
+                    //queueSpeak("je tourne la photo");
 //                            tensorImage224 = rotate90processor.process(tensorImage224);
                     tensorImage224 = Image.rotate90(tensorImage224, rotation_compensate_k);
 
@@ -279,60 +319,91 @@ public class AssistantApp extends Application {
                 float[] top_right = Arrays.copyOfRange(im_array, (224-11)*3, (224-10)*3);
                 Log.i("COLOR", "top left: " + Arrays.toString(top_left) + " top right: " + Arrays.toString(top_right));
 
-                FloatBuffer output = FloatBuffer.allocate(1000);
+                if (imageClassifier) {
 
-                interpreter.run(tensorImage224.getBuffer().asFloatBuffer(), output);
+                    FloatBuffer output = FloatBuffer.allocate(1000);
 
-                float[] outputArray = output.array();
+                    interpreter.run(tensorImage224.getBuffer().asFloatBuffer(), output);
 
-                int maxAt = 0;
+                    float[] outputArray = output.array();
 
-                for (int i = 0; i < outputArray.length; i++) {
-                    maxAt = outputArray[i] > outputArray[maxAt] ? i : maxAt;
+                    int maxAt = 0;
+
+                    for (int i = 0; i < outputArray.length; i++) {
+                        maxAt = outputArray[i] > outputArray[maxAt] ? i : maxAt;
+                    }
+
+                    String label = imagenet_labels[maxAt];
+                    float prob = outputArray[maxAt];
+                    long percent = Math.round(prob * 100.0);
+
+                    queueSpeak("Classe " + maxAt + ", " + label + " " + percent + " pourcents");
                 }
-
-                String label = imagenet_labels[maxAt];
-                float prob = outputArray[maxAt];
-                long percent = Math.round(prob * 100.0);
 
                 Bitmap finalBitmap = bitmap;
                 activity.runOnUiThread(() -> {
                     activity.displayPhoto(finalBitmap, imageRot);
                 });
 
+                // yolo general prediction
+                if (yolow_pred) {
+                    TensorImage tensorImageYolow = new TensorImage(DataType.FLOAT32);
+                    // Analysis code for every frame
+                    // Preprocess the image
+                    tensorImageYolow.load(bitmap);
+                    if (rotation_compensate_k != 0) {
+                        tensorImageYolow = Image.rotate90(tensorImageYolow, rotation_compensate_k);
+                    }
+                    ArrayList<DetectUtils.Detect> detected = yolow.infer(tensorImageYolow, "general", 0.5, 0.3);
 
-                TensorImage tensorImageDepth = new TensorImage(DataType.FLOAT32);
-                tensorImageDepth.load(bitmap);
-                long beforeDepth = System.currentTimeMillis();
-                if (imageRot != 0) {
-//                            tensorImageDepth = rotate90processor.process(tensorImageDepth);
-                    tensorImageDepth = Image.rotate90(tensorImageDepth, rotation_compensate_k);
+                    if (detected.size() == 0) {
+                        queueSpeak("Je ne vois aucun objet.");
+                    } else {
+                        StringBuilder detectionSb = new StringBuilder();
+                        detectionSb.append("Je vois: ");
+                        for (DetectUtils.Detect detect : detected) {
+                            detectionSb.append(detect.label);
+                            detectionSb.append(", ");
+                        }
+                        queueSpeak(detectionSb.toString());
+                    }
                 }
-                tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
-                long elapsedDepth = System.currentTimeMillis() - beforeDepth;
-                Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
 
-                int depthWidth = tensorImageDepth.getWidth();
-                int depthHeight = tensorImageDepth.getHeight();
-                FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
+                // depth prediction
+                if (depth_pred) {
+                    TensorImage tensorImageDepth = new TensorImage(DataType.FLOAT32);
+                    tensorImageDepth.load(bitmap);
+                    long beforeDepth = System.currentTimeMillis();
+                    if (rotation_compensate_k != 0) {
+//                            tensorImageDepth = rotate90processor.process(tensorImageDepth);
+                        tensorImageDepth = Image.rotate90(tensorImageDepth, rotation_compensate_k);
+                    }
+                    tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
+                    long elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                    Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
 
-                beforeDepth = System.currentTimeMillis();
-                depthAnythingModel.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
-                elapsedDepth = System.currentTimeMillis() - beforeDepth;
-                Log.i("depth", "depth inference: " + elapsedDepth + " ms");
+                    int depthWidth = tensorImageDepth.getWidth();
+                    int depthHeight = tensorImageDepth.getHeight();
+                    FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
 
-                Log.i("DEPTH", Arrays.toString(depthOutput.array()));
-                Log.i("BITMAP", Image.describeBitmap(bitmap));
-                Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
-                Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
-                //Bitmap finalDepthBitmap = bitmap; // works
-                activity.runOnUiThread(() -> {
-                    Log.i("BITMAP", "displaying depth bitmap");
-                    activity.displayPhoto(finalDepthBitmap, imageRot);
-                    Log.i("BITMAP", "issued command: displaying depth bitmap");
-                });
+                    beforeDepth = System.currentTimeMillis();
+                    depthAnythingModel.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
+                    elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                    Log.i("depth", "depth inference: " + elapsedDepth + " ms");
 
-                queueSpeak("Classe " + maxAt + ", " + label + " " + percent + " pourcents");
+                    depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
+
+                    Log.i("DEPTH", Arrays.toString(depthOutput.array()));
+                    Log.i("BITMAP", Image.describeBitmap(bitmap));
+                    Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
+                    Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
+                    //Bitmap finalDepthBitmap = bitmap; // works
+                    activity.runOnUiThread(() -> {
+                        Log.i("BITMAP", "displaying depth bitmap");
+                        activity.displayPhoto(finalDepthBitmap, imageRot);
+                        Log.i("BITMAP", "issued command: displaying depth bitmap");
+                    });
+                }
 
                 super.onCaptureSuccess(image);
             }
@@ -344,8 +415,7 @@ public class AssistantApp extends Application {
                 queueSpeak("Il y a eu une erreur quand j'ai essayé de prendre une photo");
                 super.onError(exception);
             }
-        };
-        return callback;
+        });
     }
 
 

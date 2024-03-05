@@ -57,4 +57,11 @@ dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.14.0'
     implementation 'org.tensorflow:tensorflow-lite-gpu:2.14.0'
     implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+
+//    implementation 'org.tensorflow:ndarray:0.4.0'
+//    implementation 'org.nd4j:nd4j-api:1.0.0-M2.1'
+//    implementation 'org.nd4j:nd4j-native-platform:1.0.0-M2.1'
+
+    implementation "org.jetbrains.kotlinx:multik-core:0.2.3"
+    implementation "org.jetbrains.kotlinx:multik-kotlin:0.2.3"
 }

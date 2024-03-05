@@ -22,6 +22,10 @@ public class Image {
         return new NormalizeOp(MEAN_RGB, STDDEV_RGB);
     }
 
+    public static NormalizeOp getIntNormalizeOp() {
+        return new NormalizeOp(new float[]{0.0f, 0.0f, 0.0f}, new float[]{255.0f, 255.0f, 255.0f});
+    }
+
 
     public static TensorImage rotate90(TensorImage tensorImage, int k) {
         ImageProcessor rotate90processor =
@@ -40,6 +44,20 @@ public class Image {
         return rot / 90;
     }
 
+    public static FloatBuffer rgbImageTranspose(FloatBuffer in, int width, int height) {
+        FloatBuffer out = FloatBuffer.allocate(in.capacity());
+        out.rewind();
+        float[] in_array = in.array();
+
+        for (int i=0; i<width; i++) {
+            for (int j=0; j<height; j++) {
+                int pos = (i + j*width);
+                out.put(in_array[pos]);
+            }
+        }
+        out.rewind();
+        return out;
+    }
 
     public static String describeBitmap(Bitmap bitmap) {
         String out = "";
