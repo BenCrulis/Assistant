@@ -6,11 +6,13 @@ import androidx.camera.core.ImageCapture;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import android.content.Context;
 import android.content.pm.PackageManager;;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.util.Log;
+import android.view.WindowManager;
 import android.widget.Button;
 
 import android.Manifest;
@@ -28,7 +30,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int SPEECH_REQUEST_CODE = 0;
 
     private AssistantApp getAssistantApp() {
-        return (AssistantApp) getApplication();
+        return AssistantApp.getInstance();
     }
 
     // Create an intent that can start the Speech Recognizer activity
@@ -81,8 +83,8 @@ public class MainActivity extends AppCompatActivity {
         toast.show();
     }
 
-    public void takePhoto() {
-        assistantApp.takePhoto(this);
+    public void takePhoto(int rot) {
+        assistantApp.takePhoto(this, rot);
     }
 
     @Override
@@ -108,7 +110,10 @@ public class MainActivity extends AppCompatActivity {
             Log.d("BUTTONS", "Taking photo and classifying it");
             assistantApp.flushSpeak("Je prend une photo.");
             Log.i("TTS", "started speaking");
-            takePhoto();
+
+            WindowManager windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+            int rot = windowManager.getDefaultDisplay().getRotation();
+            takePhoto(rot);
         });
 
 
