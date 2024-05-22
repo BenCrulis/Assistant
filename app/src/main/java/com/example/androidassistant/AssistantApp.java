@@ -230,7 +230,7 @@ public class AssistantApp extends Application {
 //            Bitmap diskImage = BitmapFactory.decodeFile(basePath + "Great_White_Shark.jpg");
             Bitmap diskImage = BitmapFactory.decodeFile(basePath + "test_image.png");
             TensorImage tensorImage = TensorImage.fromBitmap(diskImage);
-            Log.i("GWS", "raw: " + Arrays.toString(tensorImage.getTensorBuffer().getFloatArray()));
+//            Log.i("GWS", "raw: " + Arrays.toString(tensorImage.getTensorBuffer().getFloatArray()));
             tensorImage = imageProcessor.process(tensorImage);
 
             Log.i("info", "before GWS");
