@@ -2,6 +2,7 @@ package com.example.androidassistant;
 
 import static com.example.androidassistant.utils.Image.getImagenetNormalizeOp;
 
+import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
@@ -13,11 +14,17 @@ import android.util.Log;
 import android.view.WindowManager;
 import android.widget.Button;
 
+import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.ImageProxy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.lifecycle.ProcessLifecycleOwner;
 
+import com.example.androidassistant.utils.Image;
+
+import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.Tensor;
 import org.tensorflow.lite.support.image.ImageProcessor;
@@ -32,6 +39,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -39,6 +47,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 
 public class AssistantApp extends Application {
     private AssistantApp singleton = null;
@@ -213,6 +222,131 @@ public class AssistantApp extends Application {
         }
     }
 
+    public void takePhoto(MainActivity activity) {
+        ImageCapture.OnImageCapturedCallback callback = this.getPhotoCallback(activity);
+        imageCapture.takePicture(Executors.newSingleThreadExecutor(), callback);
+    }
+
+    public ImageCapture.OnImageCapturedCallback getPhotoCallback(MainActivity activity) {
+        ImageCapture.OnImageCapturedCallback callback = new ImageCapture.OnImageCapturedCallback() {
+            @Override
+            public void onCaptureSuccess(@NonNull ImageProxy image) {
+                Log.i("PHOTO", "photo successfully taken");
+//                        queueSpeak("J'ai pris une photo, j'analyse...");
+                int height = image.getHeight();
+                int width = image.getWidth();
+                int planes = image.getPlanes().length;
+                int imageRot = image.getImageInfo().getRotationDegrees();
+                int rotation_compensate_k = -Image.compute_k_from_degrees(imageRot);
+                queueSpeak("k=" + rotation_compensate_k);
+                Log.i("PHOTO", "width: " + width + ", height: " + height);
+                Log.i("PHOTO", "rotation: " + imageRot + "°");
+                if (height > width) {
+                    queueSpeak("Photo anormale, la hauteur est plus grande que la largeur.");
+                }
+                Bitmap bitmap = image.toBitmap();
+                bitmap = bitmap.copy(bitmap.getConfig(), false);
+//                        queueSpeak("L'image est de taille " + width + " par " + height +
+//                                " pixels, avec " + planes + " plans");
+                IntBuffer buffer = image.getPlanes()[0]
+                        .getBuffer()
+                        .asIntBuffer()
+                        .asReadOnlyBuffer();
+                buffer.rewind();
+                int[] intArray = new int[buffer.remaining()];
+                buffer.get(intArray);
+                Log.i("buffer", "toString: " + Arrays.toString(intArray));
+
+                // Create a TensorImage object. This creates the tensor of the corresponding
+                // tensor type that the TensorFlow Lite interpreter needs.
+                TensorImage tensorImage224 = new TensorImage(DataType.FLOAT32);
+                // Analysis code for every frame
+                // Preprocess the image
+                tensorImage224.load(bitmap);
+                long beforeClassify = System.currentTimeMillis();
+                if (imageRot != 0) {
+                    queueSpeak("je tourne la photo");
+//                            tensorImage224 = rotate90processor.process(tensorImage224);
+                    tensorImage224 = Image.rotate90(tensorImage224, rotation_compensate_k);
+
+                }
+                tensorImage224 = imageProcessor.process(tensorImage224);
+                long elapsedClassify = System.currentTimeMillis() - beforeClassify;
+                Log.i("classify", "classify preprocessing: " + elapsedClassify + " ms");
+
+                float[] im_array = tensorImage224.getTensorBuffer().getFloatArray();
+                float[] top_left = Arrays.copyOfRange(im_array, 10*3, 11*3);
+                float[] top_right = Arrays.copyOfRange(im_array, (224-11)*3, (224-10)*3);
+                Log.i("COLOR", "top left: " + Arrays.toString(top_left) + " top right: " + Arrays.toString(top_right));
+
+                FloatBuffer output = FloatBuffer.allocate(1000);
+
+                interpreter.run(tensorImage224.getBuffer().asFloatBuffer(), output);
+
+                float[] outputArray = output.array();
+
+                int maxAt = 0;
+
+                for (int i = 0; i < outputArray.length; i++) {
+                    maxAt = outputArray[i] > outputArray[maxAt] ? i : maxAt;
+                }
+
+                String label = imagenet_labels[maxAt];
+                float prob = outputArray[maxAt];
+                long percent = Math.round(prob * 100.0);
+
+                Bitmap finalBitmap = bitmap;
+                activity.runOnUiThread(() -> {
+                    activity.displayPhoto(finalBitmap, imageRot);
+                });
+
+
+                TensorImage tensorImageDepth = new TensorImage(DataType.FLOAT32);
+                tensorImageDepth.load(bitmap);
+                long beforeDepth = System.currentTimeMillis();
+                if (imageRot != 0) {
+//                            tensorImageDepth = rotate90processor.process(tensorImageDepth);
+                    tensorImageDepth = Image.rotate90(tensorImageDepth, rotation_compensate_k);
+                }
+                tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
+                long elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
+
+                int depthWidth = tensorImageDepth.getWidth();
+                int depthHeight = tensorImageDepth.getHeight();
+                FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
+
+                beforeDepth = System.currentTimeMillis();
+                depthAnythingModel.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
+                elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                Log.i("depth", "depth inference: " + elapsedDepth + " ms");
+
+                Log.i("DEPTH", Arrays.toString(depthOutput.array()));
+                Log.i("BITMAP", Image.describeBitmap(bitmap));
+                Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
+                Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
+                //Bitmap finalDepthBitmap = bitmap; // works
+                activity.runOnUiThread(() -> {
+                    Log.i("BITMAP", "displaying depth bitmap");
+                    activity.displayPhoto(finalDepthBitmap, imageRot);
+                    Log.i("BITMAP", "issued command: displaying depth bitmap");
+                });
+
+                queueSpeak("Classe " + maxAt + ", " + label + " " + percent + " pourcents");
+
+                super.onCaptureSuccess(image);
+            }
+
+            @Override
+            public void onError(@NonNull ImageCaptureException exception) {
+                Log.e("PHOTO", "there has been an error taking the photo");
+                Log.e("PHOTO", exception.toString());
+                queueSpeak("Il y a eu une erreur quand j'ai essayé de prendre une photo");
+                super.onError(exception);
+            }
+        };
+        return callback;
+    }
 
 
     private void copyAssetToDisk(String path) {
