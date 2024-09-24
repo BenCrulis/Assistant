@@ -14,12 +14,12 @@ import org.jetbrains.kotlinx.multik.ndarray.data.NDArray;
 import org.jetbrains.kotlinx.multik.ndarray.data.SliceKt;
 import org.jetbrains.kotlinx.multik.ndarray.data.ViewGettersAndSettersKt;
 import org.jetbrains.kotlinx.multik.ndarray.data.SliceEndStub;
-import org.tensorflow.lite.support.image.BoundingBoxUtil;
 
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 
 
@@ -186,6 +186,82 @@ public class DetectUtils {
                 box2 = xywh_to_xyxy(box2);
                 float iou = iou(box1, box2);
                 if (iou > IoUThresh) {
+                    p.remove(j);
+                    --j;
+                }
+            }
+        }
+
+        for (int i = 0; i < p.size(); i++) {
+            Pair<Integer, Float> pair = p.get(i);
+            int idx = pair.first;
+            int cls_idx = max_idx[idx] - 4; // remove 4 because of the 4 bounding box coordinates
+            float prob = max_prob[idx];
+            float[] box = Arrays.copyOfRange(arr, n_cols*idx, n_cols*idx + 4);
+            Detect detect = new DetectUtils.Detect(cls_idx, prob, box);
+            results.add(detect);
+        }
+
+        return results;
+    }
+
+    /**
+     * Non-maximum suppression for classes that can only be detected once.
+     * @param arr
+     * @param n_rows
+     * @param IoUThresh
+     * @param min_prob
+     * @return
+     */
+    public static ArrayList<Detect> non_maximum_suppression_single(float[] arr, int n_rows, double IoUThresh, double min_prob) {
+        ArrayList<Pair<Integer, Float>> p = new ArrayList<>();
+
+        int[] max_idx = new int[n_rows];
+        Arrays.fill(max_idx, -1);
+        float[] max_prob = new float[n_rows];
+        Arrays.fill(max_prob, -1.0f);
+
+        int n_cols = arr.length / n_rows;
+
+        for (int i = 0; i < n_rows; i++) {
+            float max_val = Float.MIN_VALUE;
+            int idx_val = 0;
+            for (int j = 4; j < n_cols; j++) {
+                int cur_idx = n_cols * i + j;
+                float val = arr[cur_idx];
+                if (val > max_val) {
+                    max_val = val;
+                    idx_val = j;
+                }
+            }
+            max_prob[i] = max_val;
+            max_idx[i] = idx_val;
+            if (max_val > min_prob) {
+                float[] box = DetectUtils.xywh_to_xyxy(Arrays.copyOfRange(arr, i*n_cols, i*n_cols + 4));
+                float box_area = box_area(box);
+                boolean positive_surface = has_positive_surface(box);
+                if (positive_surface && box_area > 0.0) {
+                    p.add(new Pair<>(i, max_val));
+                }
+            }
+        }
+
+        ArrayList<Detect> results = new ArrayList<>();
+
+        //int[] sorted = ArrayUtils.argsort(max_prob, false);
+
+        Collections.sort(p, (p1, p2) -> p2.second.compareTo(p1.second));
+
+        for (int i = 0; i < p.size(); i++) {
+            int idx1 = n_cols * p.get(i).first;
+            float[] box1 = Arrays.copyOfRange(arr, idx1, idx1 + 4);
+            box1 = xywh_to_xyxy(box1);
+            for (int j = i+1; j < p.size(); j++) {
+                int idx2 = n_cols * p.get(j).first;
+                float[] box2 = Arrays.copyOfRange(arr, idx2, idx2 + 4);
+                box2 = xywh_to_xyxy(box2);
+                float iou = iou(box1, box2);
+                if (iou > IoUThresh || max_idx[p.get(j).first] == max_idx[p.get(i).first]) {
                     p.remove(j);
                     --j;
                 }

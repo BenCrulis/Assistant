@@ -4,9 +4,11 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:layout_centerHorizontal="true"
     tools:context=".MainActivity">
 
     <LinearLayout
+        android:id="@+id/linear_button_layout"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_margin="20dp"
@@ -16,20 +18,78 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.0">
 
         <Button
             android:id="@+id/classify_photo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Prendre une photo et classifier" />
+            android:text="Détecter des objets généraux" />
 
         <Button
-            android:id="@+id/voice_input"
+            android:id="@+id/obj_recognition_button"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:enabled="true"
-            android:text="activer la reconnaissance vocale" />
+            android:text="Reconnaitre des objets enregistrés" />
+
+        <Button
+            android:id="@+id/object_saving_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enregistrement d'objets" />
+
+        <Button
+            android:id="@+id/describe_photo_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Décrire une photo" />
+
+        <Button
+            android:id="@+id/dirtiness_detection_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Évaluer la saleté" />
+
+        <Button
+            android:id="@+id/sonar_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Sonar" />
+
+        <!--        <Button-->
+        <!--            android:id="@+id/test_vllm"-->
+        <!--            android:layout_width="match_parent"-->
+        <!--            android:layout_height="wrap_content"-->
+        <!--            android:text="Test VLLM" />-->
+
+        <!--        <Button-->
+        <!--            android:id="@+id/voice_input"-->
+        <!--            android:layout_width="match_parent"-->
+        <!--            android:layout_height="wrap_content"-->
+        <!--            android:enabled="true"-->
+        <!--            android:text="activer la reconnaissance vocale" />-->
+
+        <!--        <Button-->
+        <!--            android:id="@+id/test_mem_button"-->
+        <!--            android:layout_width="match_parent"-->
+        <!--            android:layout_height="wrap_content"-->
+        <!--            android:enabled="true"-->
+        <!--            android:text="test memory" />-->
+
+        <!--        <Button-->
+        <!--            android:id="@+id/benchmark_button"-->
+        <!--            android:layout_width="match_parent"-->
+        <!--            android:layout_height="wrap_content"-->
+        <!--            android:enabled="true"-->
+        <!--            android:text="benchmark" />-->
+
+        <!--        <Button-->
+        <!--            android:id="@+id/test_mm_button"-->
+        <!--            android:layout_width="match_parent"-->
+        <!--            android:layout_height="wrap_content"-->
+        <!--            android:enabled="true"-->
+        <!--            android:text="test model manager" />-->
 
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

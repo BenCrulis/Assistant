@@ -52,6 +52,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.StringJoiner;
 
 import com.example.androidassistant.utils.TFLite;
@@ -73,7 +74,7 @@ public class YOLOW {
                     .build();
 
     private String model_size;
-    private Interpreter model = null;
+//    private Interpreter model = null;
     private HashMap<String, YOLOWTargets> yolow_targets = null;
 
 
@@ -128,20 +129,20 @@ public class YOLOW {
     }
 
 
-    public void loadYOLOW(Application app, Interpreter.Options options) {
-        String filename = "yolov8" + this.model_size + "-world.tflite";
-        try {
-            InputStream inputStream = app.getAssets().open(filename);
-            int size = inputStream.available();
-
-            model = TFLite.loadModelWithSize(inputStream, size, options);
-            inputStream.close();
-        }
-        catch (IOException e) {
-            Log.e("YOLOW", "exception", e);
-            System.exit(1);
-        }
-    }
+//    public void loadYOLOW(Application app, Interpreter.Options options) {
+//        String filename = "yolov8" + this.model_size + "-world.tflite";
+//        try {
+//            InputStream inputStream = app.getAssets().open(filename);
+//            int size = inputStream.available();
+//
+//            model = TFLite.loadModelWithSize(inputStream, size, options);
+//            inputStream.close();
+//        }
+//        catch (IOException e) {
+//            Log.e("YOLOW", "exception", e);
+//            System.exit(1);
+//        }
+//    }
 
     public void add_targets(YOLOWTargets targets, String use_case) {
         this.yolow_targets.put(use_case, targets);
@@ -184,7 +185,115 @@ public class YOLOW {
         return objects;
     }
 
-    public ArrayList<DetectUtils.Detect> infer(TensorImage image, String use_case, double IoUThresh, double min_prob) {
+
+    public ArrayList<DetectUtils.Detect> inferUsingEmbeddings(
+            Interpreter model,
+            TensorImage image,
+            TensorBufferFloat embeddings,
+            List<String> labels,
+            double IoUThresh, double min_prob) {
+        TensorImage processed = yoloWProcessor.process(image);
+        Log.i("YOLOW", "length image array: " + processed.getBuffer().asFloatBuffer().limit());
+
+        FloatBuffer floatBuffer = processed.getBuffer().asFloatBuffer();
+
+        int num_targets = embeddings.getFlatSize() / EMB_DIM;
+
+        if (num_targets != labels.size()) {
+            throw new IllegalArgumentException(
+                    "number of labels is different from the number of embeddings (" +
+                            labels.size() + " != " + num_targets + ").");
+        }
+
+        int n_col = (num_targets + 4);
+        int out_tensor_size = n_col * N_ANCHORS;
+
+        FloatBuffer outBuffer = FloatBuffer.allocate(out_tensor_size);
+        HashMap<Integer, Object> outHashmap = new HashMap<>();
+        outHashmap.put(0, outBuffer);
+        Log.i("YOLOW", "starting inference");
+
+        Log.i("YOLOW", "signature keys: " + Arrays.toString(model.getSignatureKeys()));
+        model.resizeInput(1, new int[]{1, num_targets, EMB_DIM});
+        model.allocateTensors();
+        Tensor inp1 = model.getInputTensor(0);
+        Tensor inp2 = model.getInputTensor(1);
+        Log.i("YOLOW", "inp1: " + inp1.numElements() + "  inp2: " + inp2.numElements());
+
+        Object[] inputs = new Object[]{processed.getBuffer().asFloatBuffer(), embeddings.getBuffer().asFloatBuffer()};
+        model.runForMultipleInputsOutputs(inputs, outHashmap);
+
+        TensorBuffer outTensor = TensorBuffer.createFixedSize(new int[]{1, N_ANCHORS, n_col}, DataType.FLOAT32);
+        float[] outArray = outBuffer.array();
+        outTensor.loadArray(outArray);
+
+        ArrayList<DetectUtils.Detect> detects = DetectUtils.non_maximum_suppression(outArray,  N_ANCHORS, IoUThresh, min_prob);
+
+        for (DetectUtils.Detect detect : detects) {
+            detect.label = labels.get(detect.class_idx);
+        }
+
+        Log.i("YOLOW", "nb detections: " + detects.size());
+        Log.i("YOLOW", "detections: " + detects);
+
+        return detects;
+    }
+
+
+    public ArrayList<DetectUtils.Detect> inferUsingEmbeddingsNoDuplicateClass(
+            Interpreter model,
+            TensorImage image,
+            TensorBufferFloat embeddings,
+            List<String> labels,
+            double IoUThresh, double min_prob) {
+        TensorImage processed = yoloWProcessor.process(image);
+        Log.i("YOLOW", "length image array: " + processed.getBuffer().asFloatBuffer().limit());
+
+        FloatBuffer floatBuffer = processed.getBuffer().asFloatBuffer();
+
+        int num_targets = embeddings.getFlatSize() / EMB_DIM;
+
+        if (num_targets != labels.size()) {
+            throw new IllegalArgumentException(
+                    "number of labels is different from the number of embeddings (" +
+                            labels.size() + " != " + num_targets + ").");
+        }
+
+        int n_col = (num_targets + 4);
+        int out_tensor_size = n_col * N_ANCHORS;
+
+        FloatBuffer outBuffer = FloatBuffer.allocate(out_tensor_size);
+        HashMap<Integer, Object> outHashmap = new HashMap<>();
+        outHashmap.put(0, outBuffer);
+        Log.i("YOLOW", "starting inference");
+
+        Log.i("YOLOW", "signature keys: " + Arrays.toString(model.getSignatureKeys()));
+        model.resizeInput(1, new int[]{1, num_targets, EMB_DIM});
+        model.allocateTensors();
+        Tensor inp1 = model.getInputTensor(0);
+        Tensor inp2 = model.getInputTensor(1);
+        Log.i("YOLOW", "inp1: " + inp1.numElements() + "  inp2: " + inp2.numElements());
+
+        Object[] inputs = new Object[]{processed.getBuffer().asFloatBuffer(), embeddings.getBuffer().asFloatBuffer()};
+        model.runForMultipleInputsOutputs(inputs, outHashmap);
+
+        TensorBuffer outTensor = TensorBuffer.createFixedSize(new int[]{1, N_ANCHORS, n_col}, DataType.FLOAT32);
+        float[] outArray = outBuffer.array();
+        outTensor.loadArray(outArray);
+
+        ArrayList<DetectUtils.Detect> detects = DetectUtils.non_maximum_suppression_single(outArray,  N_ANCHORS, IoUThresh, min_prob);
+
+        for (DetectUtils.Detect detect : detects) {
+            detect.label = labels.get(detect.class_idx);
+        }
+
+        Log.i("YOLOW", "nb detections: " + detects.size());
+        Log.i("YOLOW", "detections: " + detects);
+
+        return detects;
+    }
+
+    public ArrayList<DetectUtils.Detect> infer(Interpreter model, TensorImage image, String use_case, double IoUThresh, double min_prob) {
         YOLOWTargets targets = get_targets(use_case);
         if (targets == null) {
             Log.e("YOLOW", "unknown use case: " + use_case);
@@ -203,7 +312,7 @@ public class YOLOW {
             stringJoiner.add(String.valueOf(val));
         }
 
-        Log.i("IMG", stringJoiner.toString());
+//        Log.i("IMG", stringJoiner.toString());
 
         int n_col = (targets.classes.length + 4);
         int out_tensor_size = n_col * N_ANCHORS;
@@ -233,7 +342,7 @@ public class YOLOW {
 
         assert outArray[1000] == outTensor.getFloatValue(1000);
 
-        Log.i("YOLOW", "inferred: " + Arrays.toString(outBuffer.array()));
+//        Log.i("YOLOW", "inferred: " + Arrays.toString(outBuffer.array()));
 
 //        ArrayList<Integer> objects = YOLOW.classes_from_tensor(outBuffer, 0.5);
 //        Log.i("YOLOW", "number of detected objects: " + objects.size());
