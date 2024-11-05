@@ -1,7 +1,9 @@
 package com.example.androidassistant;
 
 import static com.example.androidassistant.utils.Image.getImagenetNormalizeOp;
+import static com.example.androidassistant.utils.Image.getIntNormalizeOp;
 
+import android.app.Activity;
 import android.graphics.Bitmap;
 import android.util.Log;
 
@@ -29,11 +31,12 @@ public class Sonar {
     private static final ImageProcessor imageProcessor =
             new ImageProcessor.Builder()
                     .add(new ResizeOp(DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE, ResizeOp.ResizeMethod.BILINEAR))
-                    .add(getImagenetNormalizeOp())
+//                    .add(getImagenetNormalizeOp())
+                    .add(getIntNormalizeOp())
                     .build();
 
 
-    public static float getDistance(@NonNull ImageProxy image, Interpreter interpreter) {
+    public static float getDistance(Activity activity, @NonNull ImageProxy image, Interpreter interpreter) {
         int height = image.getHeight();
         int width = image.getWidth();
         int planes = image.getPlanes().length;
@@ -86,16 +89,17 @@ public class Sonar {
         depthValue = depthOutput.get();
         Log.i("depth", "depth value: " + depthValue);
 
-//        depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
+        depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
 
-//        Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
-//        Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
-        //Bitmap finalDepthBitmap = bitmap; // works
-//        activity.runOnUiThread(() -> {
-//            Log.i("BITMAP", "displaying depth bitmap");
-//            displayPhoto(finalDepthBitmap, imageRot);
-//            Log.i("BITMAP", "issued command: displaying depth bitmap");
-//        });
+        Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
+        Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
+//        Bitmap finalDepthBitmap = bitmap; // works
+        activity.runOnUiThread(() -> {
+            Log.i("BITMAP", "displaying depth bitmap");
+            AssistantApp app = AssistantApp.getInstance();
+            app.displayPhoto(finalDepthBitmap, imageRot);
+            Log.i("BITMAP", "issued command: displaying depth bitmap");
+        });
 
         return depthValue;
     }

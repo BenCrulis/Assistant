@@ -34,6 +34,7 @@ import com.example.androidassistant.utils.DetectUtils;
 import com.example.androidassistant.utils.Image;
 import com.example.androidassistant.utils.TensorUtils;
 import com.example.androidassistant.utils.alloc.NativeByteBuffer;
+import com.example.androidassistant.utils.tokenization.MoondreamTokenizer;
 
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
@@ -79,6 +80,8 @@ public class AssistantApp extends Application {
 
     TextToSpeech tts = null;
     CountDownLatch ttsCountDownLatch = null;
+
+    private MoondreamTokenizer tokenizer;
 
     String[] imagenet_labels = null;
     ImageCapture imageCapture = null;
@@ -129,8 +132,16 @@ public class AssistantApp extends Application {
         return this.modelManager;
     }
 
+    public MoondreamTokenizer getTokenizer() {
+        return this.tokenizer;
+    }
+
     public AppDatabase getDb() {
         return db;
+    }
+
+    public String getAssetFilePath(String assetName) {
+        return data_base_path + assetName;
     }
 
     public static void test_memory() {
@@ -248,6 +259,10 @@ public class AssistantApp extends Application {
         copyAssetToDisk2("dirty_emb.txt");
         copyAssetToDisk2("unclean_emb.txt");
 
+        // copy tokenization files
+        copyAssetToDisk2("vocab.json");
+        copyAssetToDisk2("merges.txt");
+
 
         // quick test that should be deleted
         TensorBufferFloat testBuffer = TensorUtils.FloatTensorFromFloatValues(0.0f, 0.0f);
@@ -255,7 +270,6 @@ public class AssistantApp extends Application {
         assert arr[0] == 0.0f;
         arr[0] = 1.0f;
         assert testBuffer.getFloatValue(0) == 0.0f;
-
 
         // TFLite part
         Interpreter.Options options = new Interpreter.Options()
@@ -366,7 +380,22 @@ public class AssistantApp extends Application {
         copyAssetToDisk2(depthAnythingFileName);
         modelManager.registerModel(this, "depth_anything", depthAnythingFileName);
 
+        Log.i("INIT", "registering Moondream vision encoder");
+        String moondreamTestFileName = "moondream-q2-matmul.tflite";
+        copyAssetToDisk2(moondreamTestFileName);
+        modelManager.registerModel(this, "moondream", moondreamTestFileName);
+
+        Log.i("INIT", "registering Moondream vision encoder");
+        String moondreamVisionFileName = "moondream_vision_enc.tflite";
+        copyAssetToDisk2(moondreamVisionFileName);
+        modelManager.registerModel(this, "moondream_vision_enc", moondreamVisionFileName);
+
         Log.i("INIT", "all models registered");
+
+        // loading tokenizer
+        Log.i(TAG, "init: loading moondream tokenizer");
+        tokenizer = VLLM.loadTokenizer(this);
+
 
     }
 
@@ -777,7 +806,7 @@ public class AssistantApp extends Application {
             }
 
             ArrayList<DetectUtils.Detect> detects = yolow.inferUsingEmbeddingsNoDuplicateClass(
-                    interpreter, tensorImage, embeddingInput, names, 0.3, 0.2);
+                    interpreter, tensorImage, embeddingInput, names, 0.5, 0.4);
 
             if (detects.isEmpty()) {
                 queueSpeak("Je ne vois aucun objet.");
@@ -791,6 +820,28 @@ public class AssistantApp extends Application {
                 queueSpeak(detectionSb.toString());
             }
 
+        });
+    }
+
+    public void takePhotoAndDescribe(Activity activity) {
+        this.queueSpeak("Je prend une photo. Analyse de l'image en cours.");
+        this.takePhoto(activity, tensorImage -> {
+            Log.i(TAG, "successfully got tensorImage object");
+
+            try {
+                FloatBuffer im_embed = VLLM.computeDescriptionPromptEmbedding(this, tensorImage);
+                this.queueSpeak("Calcul de la réponse.");
+
+                String description = VLLM.computeImageDescription(this, im_embed);
+
+
+            } catch (IOException e) {
+                this.queueSpeak("Il y a eu une erreur lors du calcul.");
+                return;
+            }
+
+            // do the inference loop with the image embedding
+            return;
         });
     }
 

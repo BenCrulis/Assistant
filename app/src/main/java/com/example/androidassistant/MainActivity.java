@@ -185,6 +185,16 @@ public class MainActivity extends AppCompatActivity {
             VLLM.testMoondream(assistantApp);
         });
 
+        Button tokenizer_button = new MaterialButton(this);
+        tokenizer_button.setText("test Tokenizer");
+        tokenizer_button.setEnabled(true);
+        linearLayout.addView(tokenizer_button);
+
+        tokenizer_button.setOnClickListener(v -> {
+            Log.d("BUTTONS", "Testing Tokenizer");
+            VLLM.testTokenizer(assistantApp);
+        });
+
 //        Button voiceReconButton = findViewById(R.id.voice_input);
         Button voiceReconButton = new MaterialButton(this);
         voiceReconButton.setText("Tester vocal");
@@ -263,13 +273,13 @@ public class MainActivity extends AppCompatActivity {
 
         Button describe_photo_button = findViewById(R.id.describe_photo_button);
         describe_photo_button.setOnClickListener(v -> {
-            assistantApp.queueSpeak("La description de photo n'est pas encore implémentée.");
+            assistantApp.takePhotoAndDescribe(this);
         });
 
         Button sonar_button = findViewById(R.id.sonar_button);
         sonar_button.setOnClickListener(v -> {
             Log.i("SONAR", "starting sonar activity");
-            assistantApp.queueSpeak("Lancement du sonar visuel.");
+            assistantApp.queueSpeak("Basculement vers l'estimation de distance.");
             Intent intent = new Intent(this, SonarActivity.class);
             startActivity(intent);
         });

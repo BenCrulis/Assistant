@@ -7,6 +7,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Size;
@@ -39,6 +40,7 @@ public class SonarActivity extends AppCompatActivity {
 
     private ExecutorService cameraExecutor;
     private AssistantApp app;
+    private boolean stopped = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +109,8 @@ public class SonarActivity extends AppCompatActivity {
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
 
+        Activity activity = this;
+
         imageAnalysis.setAnalyzer(cameraExecutor, new ImageAnalysis.Analyzer() {
             @Override
             public void analyze(@NonNull ImageProxy imageProxy) {
@@ -115,7 +119,17 @@ public class SonarActivity extends AppCompatActivity {
 
                 Log.i(TAG, "analyze: test");
 
-                float distance = Sonar.getDistance(imageProxy, interpreter);
+                if (stopped) {
+                    imageProxy.close();
+                    return;
+                }
+
+                float distance = Sonar.getDistance(activity, imageProxy, interpreter);
+
+                if (stopped) {
+                    imageProxy.close();
+                    return;
+                }
 
                 String formattedDistance = formatDistance(distance);
 
@@ -137,6 +151,7 @@ public class SonarActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopped = true;
         cameraExecutor.shutdown();
         app.interruptSpeech();
     }
