@@ -114,6 +114,18 @@ public class MoondreamTokenizer {
         return new MoondreamTokenizer(vocabulary, merges);
     }
 
+    public int get_eos_token() {
+        return this.eos_token;
+    }
+
+    public int get_bos_token() {
+        return this.bos_token;
+    }
+
+    public int get_unk_token() {
+        return this.unk_token;
+    }
+
     public String token_id_to_string(int id) {
         return this.id_to_token_map.get(id);
     }

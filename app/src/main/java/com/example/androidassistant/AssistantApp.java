@@ -7,12 +7,9 @@ import android.app.ActivityManager;
 import android.app.Application;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.Surface;
-import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.Toast;
@@ -42,7 +39,6 @@ import org.tensorflow.lite.Tensor;
 import org.tensorflow.lite.support.image.ImageProcessor;
 import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
-import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 import org.tensorflow.lite.support.tensorbuffer.TensorBufferFloat;
 
 import java.io.BufferedReader;
@@ -120,7 +116,13 @@ public class AssistantApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
-        init();
+
+//        init();
+        new Thread(this::init)
+        .start();
+
+        initInUI();
+
         singleton = this;
     }
 
@@ -157,6 +159,32 @@ public class AssistantApp extends Application {
         Log.i("INFO", "attempting deallocation");
         NativeByteBuffer.deallocateBuffer(buffer);
         Log.i("INFO", "buffer deallocated");
+    }
+
+    public void initCamera() {
+        imageCapture = new ImageCapture.Builder()
+//                .setTargetRotation(windowManager.getDefaultDisplay().getRotation()) // same as putting nothing
+                .setTargetRotation(Surface.ROTATION_0)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
+                .build();
+        ProcessCameraProvider cameraProvider = null;
+        try {
+            cameraProvider = ProcessCameraProvider.getInstance(this).get();
+        } catch (Exception e) {
+            Log.e("PROVIDER", e.toString());
+            queueSpeak("Erreur au moment de récupérer la caméra");
+        }
+
+        if (cameraProvider == null) {
+            System.exit(1);
+        }
+
+        cameraProvider.bindToLifecycle(ProcessLifecycleOwner.get(), CameraSelector.DEFAULT_BACK_CAMERA, imageCapture);
+    }
+
+    public void initInUI() {
+        initCamera();
     }
 
     public void init() {
@@ -219,26 +247,6 @@ public class AssistantApp extends Application {
 //        }
 
         WindowManager windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-
-        imageCapture = new ImageCapture.Builder()
-//                .setTargetRotation(windowManager.getDefaultDisplay().getRotation()) // same as putting nothing
-                .setTargetRotation(Surface.ROTATION_0)
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
-                .build();
-        ProcessCameraProvider cameraProvider = null;
-        try {
-            cameraProvider = ProcessCameraProvider.getInstance(this).get();
-        } catch (Exception e) {
-            Log.e("PROVIDER", e.toString());
-            queueSpeak("Erreur au moment de récupérer la caméra");
-        }
-
-        if (cameraProvider == null) {
-            System.exit(1);
-        }
-
-        cameraProvider.bindToLifecycle(ProcessLifecycleOwner.get(), CameraSelector.DEFAULT_BACK_CAMERA, imageCapture);
 
         //this.displaySpeechRecognizer();
 
@@ -741,6 +749,13 @@ public class AssistantApp extends Application {
         tts.speak(speak, TextToSpeech.QUEUE_ADD, null, null);
     }
 
+    public void queueSpeakEng(String speak) {
+        Log.i("TTS", "adding to queue in english: \"" + speak + "\"");
+        tts.setLanguage(Locale.ENGLISH);
+        tts.speak(speak, TextToSpeech.QUEUE_ADD, null, null);
+        tts.setLanguage(Locale.FRENCH);
+    }
+
     public void flushSpeak(String speak) {
         Log.i("TTS", "flushing queue and saying: \"" + speak + "\"");
         tts.speak(speak, TextToSpeech.QUEUE_FLUSH, null, null);
@@ -833,6 +848,8 @@ public class AssistantApp extends Application {
                 this.queueSpeak("Calcul de la réponse.");
 
                 String description = VLLM.computeImageDescription(this, im_embed);
+
+                this.queueSpeakEng(description);
 
 
             } catch (IOException e) {

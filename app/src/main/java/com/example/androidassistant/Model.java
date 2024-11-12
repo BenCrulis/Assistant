@@ -28,6 +28,12 @@ public class Model implements AutoCloseable {
         this.closed = false;
     }
 
+    public Model(InputStream inputStream, int size, Interpreter.Options options) {
+        this.modelWithBuffer = TFLite.loadModelWithSizeUnsafe(inputStream, size, options);
+        this.size = size;
+        this.closed = false;
+    }
+
     public static Model loadFromAssets(Application app, String filename) throws IOException {
         InputStream inputStream = app.getAssets().open(filename);
         int size = inputStream.available();
@@ -40,6 +46,14 @@ public class Model implements AutoCloseable {
         InputStream inputStream = Files.newInputStream(app.getDataDir().toPath().resolve(filename));
         int size = inputStream.available();
         Model model = new Model(inputStream, size);
+        inputStream.close();
+        return model;
+    }
+
+    public static Model loadFromFile(Application app, String filename, Interpreter.Options options) throws IOException {
+        InputStream inputStream = Files.newInputStream(app.getDataDir().toPath().resolve(filename));
+        int size = inputStream.available();
+        Model model = new Model(inputStream, size, options);
         inputStream.close();
         return model;
     }

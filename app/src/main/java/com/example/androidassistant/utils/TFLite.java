@@ -152,4 +152,10 @@ public class TFLite {
                 .setCancellable(true);
         return loadModelWithSizeUnsafe(inputStream, size, options);
     }
+
+    public static Interpreter.Options getDefaultOptions() {
+        return new Interpreter.Options()
+                .setNumThreads(1)
+                .setCancellable(true);
+    }
 }

@@ -5,6 +5,8 @@ import static androidx.core.content.ContextCompat.getDataDir;
 import android.app.Application;
 import android.util.Log;
 
+import com.example.androidassistant.utils.TFLite;
+
 import org.tensorflow.lite.Interpreter;
 
 import java.io.IOException;
@@ -42,10 +44,19 @@ public class ModelManager {
     private static class ModelFileAndSize {
         public final String file;
         public final int size;
+        private Interpreter.Options options;
 
         public ModelFileAndSize(String file, int size) {
             this.file = file;
             this.size = size;
+            this.options = new Interpreter.Options()
+                    .setNumThreads(1)
+                    .setUseXNNPACK(false)
+                    .setCancellable(true);
+        }
+
+        public Interpreter.Options getOptions() {
+            return this.options;
         }
     }
 
@@ -98,6 +109,9 @@ public class ModelManager {
             size = inputStream.available();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+        if (size <= -1) {
+            throw new IllegalStateException("Could not read the size of the model");
         }
         registerModel(name, filename, size);
     }
@@ -157,6 +171,10 @@ public class ModelManager {
     }
 
     public Optional<Interpreter> getModel(Application app, String name) throws IOException {
+        return getModel(app, name, TFLite.getDefaultOptions());
+    }
+
+    public Optional<Interpreter> getModel(Application app, String name, Interpreter.Options options) throws IOException {
         ModelFileAndSize modelFileAndSize = registeredModels.get(name);
         if (modelFileAndSize == null) {
             logInfo("Could not find registered model: " + name);
@@ -192,7 +210,7 @@ public class ModelManager {
 
             // load model
             logInfo("Loading new model");
-            Model model = Model.loadFromFile(app, modelFileAndSize.file);
+            Model model = Model.loadFromFile(app, modelFileAndSize.file, options);
             ModelWithTimestamp newModelWithTimestamp = ModelWithTimestamp.create(model);
             this.loadedModels.put(modelFileAndSize.file, newModelWithTimestamp);
             logInfo("Model loaded successfully.");
