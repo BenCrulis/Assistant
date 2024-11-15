@@ -1,9 +1,15 @@
 package com.example.androidassistant;
 
+import static com.example.androidassistant.utils.Image.getIntNormalizeOp;
+
 import android.app.Application;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.util.Log;
 
+import com.example.androidassistant.utils.ResizeIfNeeded;
 import com.example.androidassistant.utils.TFLite;
+import com.example.androidassistant.utils.TransposeOp;
 import com.example.androidassistant.utils.alloc.NativeByteBuffer;
 import com.example.androidassistant.utils.tokenization.MoondreamTokenizer;
 
@@ -14,9 +20,11 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp;
 import org.tensorflow.lite.support.image.ImageProcessor;
 import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
+import org.tensorflow.lite.support.image.ops.ResizeWithCropOrPadOp;
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 import org.tensorflow.lite.support.tensorbuffer.TensorBufferFloat;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -24,6 +32,8 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -46,7 +56,8 @@ public class VLLM {
 
     public static final ImageProcessor visionProcessor =
             new ImageProcessor.Builder()
-                    .add(new ResizeOp(378, 378, ResizeOp.ResizeMethod.BILINEAR))
+//                    .add(new ResizeOp(378, 378, ResizeOp.ResizeMethod.BILINEAR))
+                    .add(new ResizeIfNeeded(378, 378))
 //                    .add(getImagenetNormalizeOp())
 //                    .add(new TransposeOp())
 //                    .add(getIntNormalizeOp())
@@ -209,22 +220,41 @@ public class VLLM {
 
         Log.i(TAG, "preprocessing image");
 
+//        TensorImage resized = (new ResizeOp(378, 378, ResizeOp.ResizeMethod.BILINEAR)).apply(tensorImage);
+//
+//        // write resized image to disk
+//        Log.i(TAG, "computeDescriptionPromptEmbedding: writing resized image to disk");
+//        resized.getBitmap().compress(Bitmap.CompressFormat.PNG, 100, Files.newOutputStream(Paths.get(app.data_base_path + "last_photo_resized.png")));
+
+
         tensorImage = visionProcessor.process(tensorImage);
+
+        ByteBuffer imgBuffer = tensorImage.getBuffer();
+        Log.i(TAG, "computeDescriptionPromptEmbedding: tensor image byte order: " + imgBuffer.order());
+        imgBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
         Log.i(TAG, "computing embedding");
 
-        vision_encoder.run(tensorImage.getBuffer(), out_embed_floatbuffer);
+        // compute the embedding
+        vision_encoder.run(imgBuffer, out_embed_floatbuffer);
+
+//        FloatBuffer testImage = load_test_image();
+//        Log.i(TAG, "computeDescriptionPromptEmbedding: Warning: using test image!");
+//        vision_encoder.run(testImage, out_embed_floatbuffer); // /!\ uses test image
 
         Log.i(TAG, "unloading vision encoder");
 
         modelManager.unloadModel("moondream_vision_enc");
+
+//        Log.i(TAG, "computeDescriptionPromptEmbedding: Warning: loading test embedding!");
+//        out_embed_floatbuffer = load_test_emb();
 
         Log.i(TAG, "embedding: " + Arrays.toString(out_embed_floatbuffer.array()));
         return out_embed_floatbuffer;
     }
 
     public static FloatBuffer computeSingleTokenEmbedding(Interpreter moondream, int token_id) {
-        assert token_id <= 50255;
+//        assert token_id <= 50255;
 
         LongBuffer prompt_tokens_buffer = LongBuffer.allocate(1); // allocate one long
         prompt_tokens_buffer.rewind();
@@ -256,6 +286,22 @@ public class VLLM {
 
         while (outFloat.hasRemaining()) {
             outFloat.put(1f);
+        }
+        out.rewind();
+        return out;
+    }
+
+    public static ByteBuffer debug_cache2(int len) {
+        ByteBuffer out = ByteBuffer.allocateDirect(len * 24 * 2 * 32 * 64 * 4);
+        out.order(ByteOrder.LITTLE_ENDIAN);
+        out.rewind();
+
+        FloatBuffer outFloat = out.asFloatBuffer();
+
+        int i = 0;
+        while (outFloat.hasRemaining()) {
+            outFloat.put((float) Math.sin(i));
+            i++;
         }
         out.rewind();
         return out;
@@ -351,9 +397,11 @@ public class VLLM {
 
                 if (cache == null) {
                     cache = output.new_state;
+                    cache.rewind();
                 } else {
                     cache.limit(cache.limit() + output.new_state.capacity());
                     cache.position(cache.limit() - output.new_state.capacity());
+                    output.new_state.rewind();
                     cache.put(output.new_state);
                     cache.rewind();
                 }
@@ -366,13 +414,15 @@ public class VLLM {
                 Log.i(TAG, "computeImageDescription: generated token: " + token_id);
                 prompt_embedding = computeSingleTokenEmbedding(moondream, token_id);
 
-                generated_tokens.add(token_id);
+                if (token_id != tokenizer.get_eos_token()){
+                    generated_tokens.add(token_id);
+                }
 
                 remaining_cache_size = (cache.capacity() - cache.limit()) / (24 * 2 * 32 * 64 * 4);
 
                 n_generated++;
             }
-            while (n_generated < 15 && token_id != tokenizer.get_eos_token() && remaining_cache_size > 0);
+            while (token_id != tokenizer.get_eos_token() && remaining_cache_size > 0);
 
         }
         catch (Exception e) {
@@ -390,7 +440,97 @@ public class VLLM {
 
     }
 
-    public static void testMoondream(Application app) {
+
+    public static FloatBuffer load_test_emb() {
+        Log.i(TAG, "load_test_image: loading test embedding from file");
+        AssistantApp app = AssistantApp.getInstance();
+
+        FloatBuffer out = FloatBuffer.allocate(729*2048);
+
+        // read from txt file as string stream
+        try {
+            Files.lines(Paths.get(app.data_base_path + "last_photo_emb.txt")).forEach(line -> {
+                float val = Float.parseFloat(line);
+                out.put(val);
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assert !out.hasRemaining();
+        out.rewind();
+
+        return out;
+    }
+
+
+    public static FloatBuffer load_test_image() {
+        Log.i(TAG, "load_test_image: loading test image from file");
+        AssistantApp app = AssistantApp.getInstance();
+
+        FloatBuffer out = FloatBuffer.allocate(378*378*3);
+
+        // read from txt file as string stream
+        try {
+            Files.lines(Paths.get(app.data_base_path + "last_photo_resized.txt")).forEach(line -> {
+                float val = Float.parseFloat(line);
+                out.put(val);
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assert !out.hasRemaining();
+        out.rewind();
+
+        return out;
+    }
+
+
+    public static void testMoondream(AssistantApp app) {
+        // first test encoder
+
+        ModelManager modelManager = app.getModelManager();
+        modelManager.unloadAll(); // make sure we have the maximum amount of memory available
+        Log.i(TAG, "loading Moondream vision encoder");
+
+        Interpreter vision_encoder;
+        try {
+            vision_encoder = modelManager.getModel(app, "moondream_vision_enc").get();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        Log.i(TAG, "testMoondream: loading image");
+
+        // loading last_photo_resized.png from the storage
+        Bitmap bitmap = BitmapFactory.decodeFile(app.data_base_path + "last_photo_resized.png");
+
+//        TensorImage tensorImage = TensorImage.fromBitmap(bitmap);
+        TensorImage tensorImage = new TensorImage(DataType.FLOAT32);
+        tensorImage.load(bitmap);
+        tensorImage = visionProcessor.process(tensorImage);
+
+        ByteBuffer imgBuffer = tensorImage.getBuffer();
+        Log.i(TAG, "testMoondream: byte order imgBuffer: " + imgBuffer.order());
+        // force little endian just in case
+        imgBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // floatbuffers are naturally in LITTLE ENDIAN
+        FloatBuffer out_embed_floatbuffer = FloatBuffer.allocate(729*2048);
+
+        Log.i(TAG, "computing embedding");
+
+        FloatBuffer testImage = load_test_image();
+        testImage.rewind();
+
+//        vision_encoder.run(imgBuffer, out_embed_floatbuffer);
+        vision_encoder.run(testImage, out_embed_floatbuffer);
+
+        Log.i(TAG, "unloading vision encoder");
+
+        modelManager.unloadModel("moondream_vision_enc");
+        out_embed_floatbuffer.rewind();
+
+
         Interpreter.Options options = new Interpreter.Options()
                 .setUseNNAPI(false)
                 .setUseXNNPACK(true)
@@ -501,7 +641,7 @@ public class VLLM {
         zero_emb_bytebuffer.rewind();
         zero_emb_bytebuffer.asFloatBuffer().put(zero_emb);
 
-        inference_loop(model,  debug_cache(10), zero_emb_bytebuffer);
+        inference_loop(model,  debug_cache2(10), zero_emb_bytebuffer);
         //inference_loop(model,  null, zero_emb_bytebuffer);
 
         // clean up memory
