@@ -74,6 +74,8 @@ public class AssistantApp extends Application {
 
     private AppDatabase db;
 
+    private boolean isInitialized = false;
+
     TextToSpeech tts = null;
     CountDownLatch ttsCountDownLatch = null;
 
@@ -118,16 +120,29 @@ public class AssistantApp extends Application {
         super.onCreate();
 
 //        init();
-        new Thread(this::init)
-        .start();
+        Thread thread = new Thread(this::init);
+        thread.start();
 
         initInUI();
 
         singleton = this;
+
+//        try {
+//            thread.join();
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        }
+
+        Log.i(TAG, "onCreate: AssistantApp finished UI initialization.");
+//        this.isInitialized = true;
     }
 
     public static AssistantApp getInstance() {
         return AssistantApp.singleton;
+    }
+
+    public boolean isInitialized() {
+        return this.isInitialized;
     }
 
     public ModelManager getModelManager() {
@@ -404,7 +419,8 @@ public class AssistantApp extends Application {
         Log.i(TAG, "init: loading moondream tokenizer");
         tokenizer = VLLM.loadTokenizer(this);
 
-
+        Log.i(TAG, "onCreate: AssistantApp finished heavy initialization.");
+        this.isInitialized = true;
     }
 
 
