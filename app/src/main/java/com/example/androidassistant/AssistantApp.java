@@ -27,6 +27,8 @@ import com.example.androidassistant.database.AppDatabase;
 import com.example.androidassistant.database.ObjDAO;
 import com.example.androidassistant.database.ObjEmbedding;
 import com.example.androidassistant.database.SavedObject;
+import com.example.androidassistant.object_detection.DetectionResultFormatting;
+import com.example.androidassistant.object_detection.DetectionWithDepth;
 import com.example.androidassistant.utils.DetectUtils;
 import com.example.androidassistant.utils.Image;
 import com.example.androidassistant.utils.TensorUtils;
@@ -317,8 +319,8 @@ public class AssistantApp extends Application {
         File modelFile = new File(basePath + modelName);
         copyAssetToDisk(basePath + modelName);
 
-        copyAssetToDisk(basePath + "depth_anything_small.tflite");
-        loadAnythingDepth(options);
+//        copyAssetToDisk(basePath + "depth_anything_small.tflite");
+//        loadAnythingDepth(options);
 
 //        copyAssetToDisk(basePath + "yolov8m_int8.tflite");
 //        loadYOLO(options);
@@ -483,9 +485,9 @@ public class AssistantApp extends Application {
                     displayPhoto(finalBitmap, imageRot);
                 });
 
+                tensorImageCallback.accept(tensorImage);
                 super.onCaptureSuccess(image);
                 image.close();
-                tensorImageCallback.accept(tensorImage);
             }
 
             @Override
@@ -504,8 +506,6 @@ public class AssistantApp extends Application {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy image) {
                 boolean imageClassifier = false;
-                boolean yolow_pred = true;
-                boolean depth_pred = false;
 
                 Log.i("PHOTO", "photo successfully taken");
 //                        queueSpeak("J'ai pris une photo, j'analyse...");
@@ -584,74 +584,77 @@ public class AssistantApp extends Application {
                 });
 
                 // yolo general prediction
-                if (yolow_pred) {
-                    TensorImage tensorImageYolow = new TensorImage(DataType.FLOAT32);
-                    // Analysis code for every frame
-                    // Preprocess the image
-                    tensorImageYolow.load(bitmap);
-                    if (rotation_compensate_k != 0) {
-                        tensorImageYolow = Image.rotate90(tensorImageYolow, rotation_compensate_k);
-                    }
+                TensorImage tensorImageYolow = new TensorImage(DataType.FLOAT32);
+                // Analysis code for every frame
+                // Preprocess the image
+                tensorImageYolow.load(bitmap);
+                if (rotation_compensate_k != 0) {
+                    tensorImageYolow = Image.rotate90(tensorImageYolow, rotation_compensate_k);
+                }
 //                    ArrayList<DetectUtils.Detect> detected = yolow.infer(tensorImageYolow, "general", 0.5, 0.3);
 
-                    Interpreter model;
-                    try {
-                        model = modelManager.getModel(app, "yolow-l").get();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                    ArrayList<DetectUtils.Detect> detected = yolow.infer(model, tensorImageYolow, "general", 0.5, 0.3);
-
-                    if (detected.size() == 0) {
-                        queueSpeak("Je ne vois aucun objet.");
-                    } else {
-                        StringBuilder detectionSb = new StringBuilder();
-                        detectionSb.append("Je vois: ");
-                        for (DetectUtils.Detect detect : detected) {
-                            detectionSb.append(detect.label);
-                            detectionSb.append(", ");
-                        }
-                        queueSpeak(detectionSb.toString());
-                    }
+                Interpreter model;
+                try {
+                    model = modelManager.getModel(app, "yolow-l").get();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
+                ArrayList<DetectUtils.Detect> detected = yolow.infer(model, tensorImageYolow, "general", 0.5, 0.3);
 
                 // depth prediction
-                if (depth_pred) {
-                    TensorImage tensorImageDepth = new TensorImage(DataType.FLOAT32);
-                    tensorImageDepth.load(bitmap);
-                    long beforeDepth = System.currentTimeMillis();
-                    if (rotation_compensate_k != 0) {
+                TensorImage tensorImageDepth = new TensorImage(DataType.FLOAT32);
+                tensorImageDepth.load(bitmap);
+                long beforeDepth = System.currentTimeMillis();
+                if (rotation_compensate_k != 0) {
 //                            tensorImageDepth = rotate90processor.process(tensorImageDepth);
-                        tensorImageDepth = Image.rotate90(tensorImageDepth, rotation_compensate_k);
-                    }
-                    tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
-                    long elapsedDepth = System.currentTimeMillis() - beforeDepth;
-                    Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
+                    tensorImageDepth = Image.rotate90(tensorImageDepth, rotation_compensate_k);
+                }
+                tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
+                long elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
 
-                    int depthWidth = tensorImageDepth.getWidth();
-                    int depthHeight = tensorImageDepth.getHeight();
-                    FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
+                int depthWidth = tensorImageDepth.getWidth();
+                int depthHeight = tensorImageDepth.getHeight();
+                FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
 
-                    beforeDepth = System.currentTimeMillis();
-                    depthAnythingModel.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
-                    elapsedDepth = System.currentTimeMillis() - beforeDepth;
-                    Log.i("depth", "depth inference: " + elapsedDepth + " ms");
+                Interpreter depthAnything;
 
-                    depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
-
-                    Log.i("DEPTH", Arrays.toString(depthOutput.array()));
-                    Log.i("BITMAP", Image.describeBitmap(bitmap));
-                    Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
-                    Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
-                    //Bitmap finalDepthBitmap = bitmap; // works
-                    activity.runOnUiThread(() -> {
-                        Log.i("BITMAP", "displaying depth bitmap");
-                        displayPhoto(finalDepthBitmap, imageRot);
-                        Log.i("BITMAP", "issued command: displaying depth bitmap");
-                    });
+                try {
+                    depthAnything = modelManager.getModel(app, "depth_anything").get();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
 
+                beforeDepth = System.currentTimeMillis();
+                depthAnything.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
+                elapsedDepth = System.currentTimeMillis() - beforeDepth;
+                Log.i("depth", "depth inference: " + elapsedDepth + " ms");
+
+                depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
+
+                Log.i("DEPTH", Arrays.toString(depthOutput.array()));
+                Log.i("BITMAP", Image.describeBitmap(bitmap));
+                Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
+                Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
+                //Bitmap finalDepthBitmap = bitmap; // works
+                activity.runOnUiThread(() -> {
+                    Log.i("BITMAP", "displaying depth bitmap");
+                    displayPhoto(finalDepthBitmap, imageRot);
+                    Log.i("BITMAP", "issued command: displaying depth bitmap");
+                });
+
+                float[] depth = depthOutput.array();
+
+                // compute a description of the results
+                ArrayList<DetectionWithDepth> detectionWithDepths =
+                        DetectUtils.computeDetectionWithDepths(detected, depth);
+
+                String description = DetectionResultFormatting.formatDetectionResult(detectionWithDepths);
+
+                queueSpeak(description);
+
                 super.onCaptureSuccess(image);
+                image.close();
             }
 
             @Override
@@ -685,55 +688,6 @@ public class AssistantApp extends Application {
             throw new RuntimeException(e);
         }
     }
-
-    private void loadAnythingDepth(Interpreter.Options options) {
-        try {
-            // getAssets().open("depth_anything_small.tflite");
-            String basePath = getDataDir().getAbsolutePath() + "/";
-            String modelName = "depth_anything_small.tflite";
-            File modelFile = new File(basePath + modelName);
-            if (!modelFile.exists()) {
-                Log.e("DEPTH", "model file does not exist at " + modelFile.getPath());
-            }
-            depthAnythingModel = new Interpreter(modelFile, options);
-        }
-        catch (Exception e) {
-            Log.e("DepthAnything", e.toString());
-            System.exit(1);
-        }
-    }
-
-    private void loadYOLO(Interpreter.Options options) {
-        String filename = "yolov8m_int8.tflite";
-        int k = 0;
-        try {
-            byte[] buffer = new byte[65536];
-            InputStream inputStream = getAssets().open(filename);
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            k = inputStream.read(buffer);
-            while (k > 0) {
-                outputStream.write(buffer, 0, k);
-                k = inputStream.read(buffer);
-            }
-            Log.i("bytebuffer", "k: " + k);
-            outputStream.flush();
-            byte[] modelBytes = outputStream.toByteArray();
-            Log.i("bytebuffer", "byte[] array size: " + modelBytes.length);
-            ByteBuffer modelBuffer = ByteBuffer.allocateDirect(modelBytes.length);
-            Log.i("bytebuffer", "bytebuffer size: " + modelBuffer.capacity());
-            modelBuffer.put(modelBytes);
-            modelBuffer.rewind();
-            Log.i("bytebuffer", "is direct: " + modelBuffer.isDirect());
-            yoloModel = new Interpreter(modelBuffer, options);
-            inputStream.close();
-        }
-        catch (Exception e) {
-            Log.e("YOLO", "exception", e);
-            Log.e("YOLO", "k was " + k);
-            System.exit(1);
-        }
-    }
-
 
     private void setupTTS() {
         Log.i("TTS", "TTS setup started");
@@ -783,6 +737,8 @@ public class AssistantApp extends Application {
 
     public void recognize_saved_objects(Activity activity) {
         ObjDAO objDAO = getDb().objDAO();
+
+        AssistantApp app = this;
 
         // get saved objects embeddings
         List<Integer> objectsWithEmb = objDAO.ObjectIdsWithAtLeastOneEmb();
@@ -836,20 +792,53 @@ public class AssistantApp extends Application {
                 throw new RuntimeException(e);
             }
 
-            ArrayList<DetectUtils.Detect> detects = yolow.inferUsingEmbeddingsNoDuplicateClass(
+            ArrayList<DetectUtils.Detect> detected = yolow.inferUsingEmbeddingsNoDuplicateClass(
                     interpreter, tensorImage, embeddingInput, names, 0.5, 0.4);
 
-            if (detects.isEmpty()) {
-                queueSpeak("Je ne vois aucun objet.");
-            } else {
-                StringBuilder detectionSb = new StringBuilder();
-                detectionSb.append("Je vois: ");
-                for (DetectUtils.Detect detect : detects) {
-                    detectionSb.append(detect.label);
-                    detectionSb.append(", ");
-                }
-                queueSpeak(detectionSb.toString());
+
+            // depth prediction
+            TensorImage tensorImageDepth = tensorImage;
+
+            int rotation_compensate_k = 0;
+
+            long beforeDepth = System.currentTimeMillis();
+
+            tensorImageDepth = imageProcessorDepth.process(tensorImageDepth);
+            long elapsedDepth = System.currentTimeMillis() - beforeDepth;
+            Log.i("depth", "depth preprocessing: " + elapsedDepth + " ms");
+
+            int depthWidth = tensorImageDepth.getWidth();
+            int depthHeight = tensorImageDepth.getHeight();
+            FloatBuffer depthOutput = FloatBuffer.allocate(depthHeight * depthWidth);
+
+            Interpreter depthAnything;
+
+            try {
+                depthAnything = modelManager.getModel(app, "depth_anything").get();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
+
+            beforeDepth = System.currentTimeMillis();
+            depthAnything.run(tensorImageDepth.getBuffer().asFloatBuffer(), depthOutput);
+            elapsedDepth = System.currentTimeMillis() - beforeDepth;
+            Log.i("depth", "depth inference: " + elapsedDepth + " ms");
+
+            depthOutput = Image.rgbImageTranspose(depthOutput, DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE);
+
+            Log.i("DEPTH", Arrays.toString(depthOutput.array()));
+            Bitmap finalDepthBitmap = Image.greyscaleBufferToBitmap(depthOutput, depthWidth, depthHeight);
+            Log.i("BITMAP", Image.describeBitmap(finalDepthBitmap));
+
+            float[] depth = depthOutput.array();
+
+            // compute a description of the results
+            ArrayList<DetectionWithDepth> detectionWithDepths =
+                    DetectUtils.computeDetectionWithDepths(detected, depth);
+
+            String description = DetectionResultFormatting.formatDetectionResult(detectionWithDepths);
+
+            queueSpeak(description);
 
         });
     }

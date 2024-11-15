@@ -2,7 +2,9 @@ package com.example.androidassistant.utils;
 
 import android.util.Pair;
 
+import com.example.androidassistant.AssistantApp;
 import com.example.androidassistant.YOLOW;
+import com.example.androidassistant.object_detection.DetectionWithDepth;
 
 import org.jetbrains.kotlinx.multik.api.Engine;
 import org.jetbrains.kotlinx.multik.api.EngineKt;
@@ -280,4 +282,37 @@ public class DetectUtils {
 
         return results;
     }
+
+
+    public static float getValueAtPos(float[] arr, int row_size, int row, int col) {
+        int idx = row * row_size + col;
+        return arr[idx];
+    }
+
+
+    public static ArrayList<DetectionWithDepth> computeDetectionWithDepths(ArrayList<Detect> detects, float[] depth) {
+        ArrayList<DetectionWithDepth> results = new ArrayList<>();
+
+        for (Detect detect : detects) {
+            float mx = detect.bbox[0];
+            float my = detect.bbox[1];
+
+            int px = (int) (mx * AssistantApp.DEPTH_IMAGE_SIZE);
+            int py = (int) (my * AssistantApp.DEPTH_IMAGE_SIZE);
+            px = Math.min(px, AssistantApp.DEPTH_IMAGE_SIZE - 1);
+            py = Math.min(py, AssistantApp.DEPTH_IMAGE_SIZE - 1);
+
+            float object_depth = getValueAtPos(depth, AssistantApp.DEPTH_IMAGE_SIZE, py, px);
+
+            DetectionWithDepth detectionWithDepth = new DetectionWithDepth(detect.label,
+                    detect.probability,
+                    detect.bbox[0], detect.bbox[1],
+                    object_depth);
+            results.add(detectionWithDepth);
+        }
+
+        return results;
+    }
+
+
 }
