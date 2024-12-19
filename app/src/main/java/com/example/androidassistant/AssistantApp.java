@@ -400,6 +400,11 @@ public class AssistantApp extends Application {
         copyAssetToDisk2(YOLOWFileName);
         modelManager.registerModel(this, YOLOWName, YOLOWFileName);
 
+        Log.i("INIT", "registering Whitening and Coloring");
+        String WC_filename = "WC_model.tflite";
+        copyAssetToDisk2(WC_filename);
+        modelManager.registerModel(this, "WC", WC_filename);
+
         Log.i("INIT", "registering DepthAnything");
         String depthAnythingFileName = "depth_anything_v2_metric_hypersim_vits.tflite";
         copyAssetToDisk2(depthAnythingFileName);

@@ -62,6 +62,11 @@ public class SpeechRecognizerUtils {
 
             }
 
+            public void finish() {
+                speechRecognizer.stopListening();
+                speechRecognizer.destroy();
+            }
+
             @Override
             public void onError(int i) {
                 Log.e("SPEECH", "there has been an error in speech recognition: " + i);
@@ -73,6 +78,11 @@ public class SpeechRecognizerUtils {
                             "Je n'ai pas la permission d'utiliser le microphone." +
                             "Veuillez redémarrer l'application et accepter la demande de permission.");
                 }
+                else if (i == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                    AssistantApp.getInstance().queueSpeak(
+                            "La langue française n'est pas supportée par votre appareil."
+                    );
+                }
                 else {
                     AssistantApp.getInstance().queueSpeak(
                             "Erreur numéro " + i + " lors de l'utilisation de la reconnaissance vocale. Veuillez rapporter cette erreur au développeur.");
@@ -82,6 +92,7 @@ public class SpeechRecognizerUtils {
             @Override
             public void onResults(Bundle bundle) {
                 callback.accept(bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION));
+                this.finish();
             }
 
             @Override
@@ -98,8 +109,10 @@ public class SpeechRecognizerUtils {
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fr");
+//        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR");
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
         intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "parlez maintenant");
+        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
 
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.getPackageName());
         // This starts the activity and populates the intent with the speech text.

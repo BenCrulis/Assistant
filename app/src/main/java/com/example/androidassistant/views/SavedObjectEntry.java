@@ -15,14 +15,19 @@ import android.widget.TextView;
 
 import com.example.androidassistant.AssistantApp;
 import com.example.androidassistant.CLIP;
+import com.example.androidassistant.ModelManager;
 import com.example.androidassistant.R;
 import com.example.androidassistant.activities.ObjectSavingActivity;
 import com.example.androidassistant.database.Embedding;
 import com.example.androidassistant.database.ObjDAO;
 import com.example.androidassistant.utils.SpeechRecognizerUtils;
 
+import org.tensorflow.lite.DataType;
+import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 
+import java.io.IOException;
+import java.nio.FloatBuffer;
 import java.sql.Blob;
 import java.util.Arrays;
 
@@ -145,7 +150,9 @@ public class SavedObjectEntry extends LinearLayout {
         assistantApp.takePhoto(objectSavingActivity, tensorImage -> {
             Log.i("ObjEntry", "successfully got tensorImage object");
 
-            CLIP clip = new CLIP(assistantApp.getModelManager());
+            ModelManager modelManager = assistantApp.getModelManager();
+
+            CLIP clip = new CLIP(modelManager);
 
             TensorBuffer emb = clip.infer(tensorImage);
 
@@ -155,6 +162,21 @@ public class SavedObjectEntry extends LinearLayout {
 
             float[] floatEmb = emb.getFloatArray();
             assert floatEmb.length == 512;
+
+            // process embedding with whitening and coloring
+            Interpreter wc;
+            try {
+                wc = modelManager.getModel(assistantApp, "WC").get();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            emb.getBuffer();
+
+            FloatBuffer wc_out = FloatBuffer.allocate(512);
+            wc.run(emb.getBuffer().rewind(), wc_out);
+
+            floatEmb = wc_out.array();
 
             objDAO.addEmbedding(this.getObjId(), new Embedding(floatEmb));
             Log.i("ObjEntry", "added embedding to database for object: " + this.getObjId());
