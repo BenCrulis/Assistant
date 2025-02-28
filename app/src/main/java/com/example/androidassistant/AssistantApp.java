@@ -1,6 +1,7 @@
 package com.example.androidassistant;
 
 import static com.example.androidassistant.utils.Image.getImagenetNormalizeOp;
+import static com.example.androidassistant.utils.Image.getIntNormalizeOp;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -105,7 +106,7 @@ public class AssistantApp extends Application {
             new ImageProcessor.Builder()
                     //.add(new Rot90Op(0))
                     .add(new ResizeOp(DEPTH_IMAGE_SIZE, DEPTH_IMAGE_SIZE, ResizeOp.ResizeMethod.BILINEAR))
-                    .add(getImagenetNormalizeOp())
+                    .add(getIntNormalizeOp())
                     .build();
 
     private ModelManager modelManager;
